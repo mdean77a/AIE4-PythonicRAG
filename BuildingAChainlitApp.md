@@ -133,6 +133,11 @@ Simply put, this downloads the file as a temp file, we load it in with `TextFile
 
 Why do we want to support streaming? What about streaming is important, or useful?
 
+--- 
+#### ANSWER #1:
+
+Streaming will make the user perceive that something is happening and will perceive a faster response.  If we did not support streaming, there would be a several second delay before the user sees anything on the screen.  Streaming is not important if there is no user interaction, but otherwise, it is critical to make the app seem friendly.
+ ---
 ## On Chat Start:
 
 The next scope is where "the magic happens". On Chat Start is when a user begins a chat session. This will happen whenever a user opens a new chat window, or refreshes an existing chat window.
@@ -175,6 +180,11 @@ Now, we'll save that into our user session!
 
 Why are we using User Session here? What about Python makes us need to use this? Why not just store everything in a global variable?
 
+---
+### ANSWER #2:
+
+This app can be hit by simultaneous users;  User Session keeps chat-related information about each user separated.  A global variable would be updated (and corrupted) by mixing information from multiple users.
+--- 
 ## On Message
 
 First, we load our chain from the user session:
