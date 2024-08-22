@@ -1,7 +1,7 @@
 import os
 from typing import List
 from chainlit.types import AskFileResponse
-from aimakerspace.text_utils import CharacterTextSplitter, TextFileLoader
+from aimakerspace.text_utils import CharacterTextSplitter, TextFileLoader, PDFLoader
 from aimakerspace.openai_utils.prompts import (
     UserRolePrompt,
     SystemRolePrompt,
@@ -31,7 +31,7 @@ class RetrievalAugmentedQAPipeline:
         self.vector_db_retriever = vector_db_retriever
 
     async def arun_pipeline(self, user_query: str):
-        context_list = self.vector_db_retriever.search_by_text(user_query, k=4)
+        context_list = self.vector_db_retriever.search_by_text(user_query, k=25)
 
         context_prompt = ""
         for context in context_list:
@@ -47,7 +47,7 @@ class RetrievalAugmentedQAPipeline:
 
         return {"response": generate_response(), "context": context_list}
 
-text_splitter = CharacterTextSplitter()
+text_splitter = CharacterTextSplitter(chunk_size=800, chunk_overlap=400)
 
 
 def process_text_file(file: AskFileResponse):
@@ -65,6 +65,28 @@ def process_text_file(file: AskFileResponse):
     return texts
 
 
+def process_pdf_file(file: AskFileResponse):
+    import tempfile
+    import PyPDF2
+
+    # Create a temporary file for the PDF
+    with tempfile.NamedTemporaryFile(mode="wb", delete=False, suffix=".pdf") as temp_file:
+        temp_file_path = temp_file.name
+
+    # Write the binary content of the PDF file to the temporary file
+    with open(temp_file_path, "wb") as f:
+        f.write(file.content)
+
+    # Load and process the PDF using an appropriate PDF loader
+    pdf_loader = PDFLoader(temp_file_path)
+    documents = pdf_loader.load_documents()
+
+    # Split the extracted text from the documents
+    texts = text_splitter.split_texts(documents)
+
+    return texts
+
+
 @cl.on_chat_start
 async def on_chat_start():
     files = None
@@ -79,14 +101,21 @@ async def on_chat_start():
         ).send()
 
     file = files[0]
-
+    
     msg = cl.Message(
         content=f"Processing `{file.name}`...", disable_human_feedback=True
     )
     await msg.send()
 
     # load the file
-    texts = process_text_file(file)
+    
+    if file.type == "text/plain":
+        texts = process_text_file(file)
+    elif file.type == "application/pdf":
+        texts = process_pdf_file(file)
+    else:
+        pass
+    
 
     print(f"Processing {len(texts)} text chunks")
 
