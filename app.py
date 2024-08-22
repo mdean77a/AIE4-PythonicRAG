@@ -12,6 +12,12 @@ from aimakerspace.vectordatabase import VectorDatabase
 from aimakerspace.openai_utils.chatmodel import ChatOpenAI
 import chainlit as cl
 
+from langchain_openai import OpenAIEmbeddings
+from langchain_qdrant import QdrantVectorStore
+from qdrant_client import QdrantClient
+from qdrant_client.http.models import Distance, VectorParams
+
+
 system_template = """\
 Use the following context to answer a users question. If you cannot find the answer in the context, say you don't know the answer."""
 system_role_prompt = SystemRolePrompt(system_template)
@@ -26,13 +32,14 @@ Question:
 user_role_prompt = UserRolePrompt(user_prompt_template)
 
 class RetrievalAugmentedQAPipeline:
-    def __init__(self, llm: ChatOpenAI(), vector_db_retriever: VectorDatabase) -> None:
+    def __init__(self, llm: ChatOpenAI(), vector_db_retriever: QdrantVectorStore) -> None:
         self.llm = llm
         self.vector_db_retriever = vector_db_retriever
 
     async def arun_pipeline(self, user_query: str):
-        context_list = self.vector_db_retriever.search_by_text(user_query, k=25)
-
+        # context_list = self.vector_db_retriever.search_by_text(user_query, k=25)
+        context_list = self.vector_db_retriever.similarity_search(user_query, k=4)
+        print(len(context_list))
         context_prompt = ""
         for context in context_list:
             context_prompt += context[0] + "\n"
@@ -40,7 +47,7 @@ class RetrievalAugmentedQAPipeline:
         formatted_system_prompt = system_role_prompt.create_message()
 
         formatted_user_prompt = user_role_prompt.create_message(question=user_query, context=context_prompt)
-
+        print(formatted_user_prompt)
         async def generate_response():
             async for chunk in self.llm.astream([formatted_system_prompt, formatted_user_prompt]):
                 yield chunk
@@ -66,8 +73,9 @@ def process_text_file(file: AskFileResponse):
 
 
 def process_pdf_file(file: AskFileResponse):
+    from langchain_community.document_loaders import PyPDFLoader
     import tempfile
-    import PyPDF2
+    # import PyPDF2
 
     # Create a temporary file for the PDF
     with tempfile.NamedTemporaryFile(mode="wb", delete=False, suffix=".pdf") as temp_file:
@@ -77,15 +85,22 @@ def process_pdf_file(file: AskFileResponse):
     with open(temp_file_path, "wb") as f:
         f.write(file.content)
 
-    # Load and process the PDF using an appropriate PDF loader
-    pdf_loader = PDFLoader(temp_file_path)
-    documents = pdf_loader.load_documents()
+    # # Load and process the PDF using an appropriate PDF loader
+    # pdf_loader = PDFLoader(temp_file_path)
+    # documents = pdf_loader.load_documents()
 
-    # Split the extracted text from the documents
-    texts = text_splitter.split_texts(documents)
+    # # Split the extracted text from the documents
+    # texts = text_splitter.split_texts(documents)
 
-    return texts
+    loader = PyPDFLoader(temp_file_path)
+    docs = loader.load()
+    docs[0]
+    print(docs[0].metadata)
+    # Since each pdf page is a separate document I will not split them
 
+    # return texts
+    # print(docs)
+    return docs
 
 @cl.on_chat_start
 async def on_chat_start():
@@ -120,14 +135,33 @@ async def on_chat_start():
     print(f"Processing {len(texts)} text chunks")
 
     # Create a dict vector store
-    vector_db = VectorDatabase()
-    vector_db = await vector_db.abuild_from_list(texts)
+    # vector_db = VectorDatabase()
+    # vector_db = await vector_db.abuild_from_list(texts)
+    # use Qdrant
+    # client = QdrantClient(":memory:")
+    # client.create_collection()
+    # client.create_collection(
+    #     collection_name="demo_collection",
+    #     vectors_config=VectorParams(size=1536, distance=Distance.COSINE),
+    # )
+    # vector_store = Qdrant.from(
+    #     client =client,
+    #     collection_name="demo_collection",
+    #     embedding = OpenAIEmbeddings(model="text-embedding-3-small"),
+    # )
+    from langchain_community.vectorstores import Qdrant
+    qdrant_vectorstore = Qdrant.from_documents(
+        texts,
+        OpenAIEmbeddings(model="text-embedding-3-small"),
+        location=":memory:",
+        collection_name = "TITRE",
+    )
     
     chat_openai = ChatOpenAI()
 
     # Create a chain
     retrieval_augmented_qa_pipeline = RetrievalAugmentedQAPipeline(
-        vector_db_retriever=vector_db,
+        vector_db_retriever=qdrant_vectorstore,
         llm=chat_openai
     )
     
